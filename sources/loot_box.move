@@ -6,10 +6,12 @@
 /// The randomness is verifiable and tamper-proof using Sui's native on-chain randomness.
 module loot_box::loot_box {
     // ===== Imports =====
+    use sui::balance::{Self, Balance};
     use sui::coin::{Self, Coin};
+    use sui::dynamic_field;
     use sui::event;
+    use sui::object::{ID, UID};
     use sui::random::{Self, Random};
-    use sui::object::{Self, UID, ID};
     use sui::transfer;
     use sui::tx_context::{Self, TxContext};
     use std::string;
@@ -17,8 +19,6 @@ module loot_box::loot_box {
     // ===== Error Codes =====
     /// Error when payment amount is insufficient
     const EInsufficientPayment: u64 = 0;
-    /// Error when caller is not the admin
-    const ENotAdmin: u64 = 1;
     /// Error when rarity weights don't sum to 100
     const EInvalidWeights: u64 = 2;
 
@@ -55,7 +55,7 @@ module loot_box::loot_box {
         /// Price to purchase one loot box
         loot_box_price: u64,
         /// Treasury collecting payments
-        treasury: Coin<T>,
+        treasury: Balance<T>,
     }
 
     /// Capability granting admin privileges
@@ -114,7 +114,7 @@ module loot_box::loot_box {
             epic_weight: DEFAULT_EPIC_WEIGHT,
             legendary_weight: DEFAULT_LEGENDARY_WEIGHT,
             loot_box_price: DEFAULT_LOOT_BOX_PRICE,
-            treasury: coin::zero<T>(ctx),
+            treasury: balance::zero<T>(),
         };
         transfer::share_object(config);
         
@@ -142,7 +142,7 @@ module loot_box::loot_box {
         ctx: &mut TxContext
     ): LootBox {
         assert!(coin::value(&payment) >= config.loot_box_price, EInsufficientPayment);
-        coin::join(&mut config.treasury, payment);
+        coin::put(&mut config.treasury, payment);
         LootBox {
             id: object::new(ctx),
         }
@@ -163,14 +163,43 @@ module loot_box::loot_box {
     /// * `r` - The Random object from address 0x8
     /// * `ctx` - Transaction context
     entry fun open_loot_box<T>(
-        config: &GameConfig<T>,
+        config: &mut GameConfig<T>,
         loot_box: LootBox,
         r: &Random,
         ctx: &mut TxContext
     ) {
+        let sender = tx_context::sender(ctx);
         let mut gen = random::new_generator(r, ctx);
-        let roll = random::generate_u8_in_range(&mut gen, 0, 99);
-        let rarity = determine_rarity(roll, config.common_weight, config.rare_weight, config.epic_weight);
+        
+        // Pity System
+        let mut pity_counter = if (dynamic_field::exists_(&config.id, sender)) {
+            *dynamic_field::borrow<address, u8>(&config.id, sender)
+        } else {
+            0
+        };
+        
+        let rarity = if (pity_counter >= 30) {
+            RARITY_LEGENDARY
+        } else {
+            let roll = random::generate_u8_in_range(&mut gen, 0, 99);
+            determine_rarity(roll, config.common_weight, config.rare_weight, config.epic_weight)
+        };
+
+        // Reset or increment pity
+        if (rarity == RARITY_LEGENDARY) {
+            pity_counter = 0;
+        } else {
+            pity_counter = pity_counter + 1;
+        };
+
+        // Update pity back to dynamic field
+        if (dynamic_field::exists_(&config.id, sender)) {
+            let pity_ref = dynamic_field::borrow_mut<address, u8>(&mut config.id, sender);
+            *pity_ref = pity_counter;
+        } else {
+            dynamic_field::add(&mut config.id, sender, pity_counter);
+        };
+        
         let (min_power, max_power) = get_power_range(rarity);
         let power = random::generate_u8_in_range(&mut gen, min_power, max_power);
         
@@ -185,13 +214,13 @@ module loot_box::loot_box {
             item_id: object::id(&item),
             rarity,
             power,
-            owner: tx_context::sender(ctx),
+            owner: sender,
         });
         
         let LootBox { id } = loot_box;
         object::delete(id);
         
-        transfer::public_transfer(item, tx_context::sender(ctx));
+        transfer::public_transfer(item, sender);
     }
 
     /// Get the stats of a GameItem
@@ -249,6 +278,25 @@ module loot_box::loot_box {
         config.rare_weight = rare;
         config.epic_weight = epic;
         config.legendary_weight = legendary;
+    }
+
+    /// Withdraw funds from the treasury (admin only)
+    /// 
+    /// # Type Parameters
+    /// * `T` - The fungible token type
+    /// 
+    /// # Arguments
+    /// * `_admin` - AdminCap proving admin privileges
+    /// * `config` - Mutable reference to GameConfig
+    /// * `ctx` - Transaction context
+    public fun withdraw_treasury<T>(
+        _admin: &AdminCap,
+        config: &mut GameConfig<T>,
+        ctx: &mut TxContext
+    ) {
+        let amount = balance::value(&config.treasury);
+        let funds = coin::from_balance(balance::split(&mut config.treasury, amount), ctx);
+        transfer::public_transfer(funds, tx_context::sender(ctx));
     }
 
     // ===== Helper Functions =====
@@ -323,5 +371,15 @@ module loot_box::loot_box {
     /// Get all rarity weights
     public fun get_rarity_weights<T>(config: &GameConfig<T>): (u8, u8, u8, u8) {
         (config.common_weight, config.rare_weight, config.epic_weight, config.legendary_weight)
+    }
+
+    #[test_only]
+    public fun set_pity_for_testing<T>(config: &mut GameConfig<T>, user: address, count: u8) {
+        if (dynamic_field::exists_(&config.id, user)) {
+            let pity_ref = dynamic_field::borrow_mut<address, u8>(&mut config.id, user);
+            *pity_ref = count;
+        } else {
+            dynamic_field::add(&mut config.id, user, count);
+        };
     }
 }
