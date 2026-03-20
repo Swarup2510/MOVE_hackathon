@@ -6,14 +6,16 @@
 /// The randomness is verifiable and tamper-proof using Sui's native on-chain randomness.
 module loot_box::loot_box {
     // ===== Imports =====
-    use sui::balance::{Self, Balance};
     use sui::coin::{Self, Coin};
+    use sui::balance::{Self, Balance};
     use sui::dynamic_field;
     use sui::event;
     use sui::object::{ID, UID};
     use sui::random::{Self, Random};
     use sui::transfer;
     use sui::tx_context::{Self, TxContext};
+    use sui::display;
+    use sui::package;
     use std::string;
 
     // ===== Error Codes =====
@@ -39,6 +41,9 @@ module loot_box::loot_box {
     const DEFAULT_LEGENDARY_WEIGHT: u8 = 3;
 
     // ===== Structs =====
+
+    /// One-time witness for the module
+    public struct LOOT_BOX has drop {}
 
     /// Shared object storing game configuration
     /// Contains rarity weights, loot box price, and treasury
@@ -94,6 +99,43 @@ module loot_box::loot_box {
         power: u8,
         /// Address of the player who opened the box
         owner: address,
+    }
+
+    // ===== Initialization =====
+
+    /// Module initializer
+    fun init(otw: LOOT_BOX, ctx: &mut TxContext) {
+        let keys = vector[
+            string::utf8(b"name"),
+            string::utf8(b"link"),
+            string::utf8(b"image_url"),
+            string::utf8(b"description"),
+            string::utf8(b"project_url"),
+            string::utf8(b"creator"),
+            string::utf8(b"rarity"),
+            string::utf8(b"power"),
+        ];
+
+        let values = vector[
+            string::utf8(b"{name}"),
+            string::utf8(b"https://explorer.sui.io/object/{id}"),
+            string::utf8(b"https://api.dicebear.com/7.x/pixel-art/svg?seed={id}"),
+            string::utf8(b"A unique {name} from the Loot Box System on Sui."),
+            string::utf8(b"https://hackathon-project.example.com"),
+            string::utf8(b"Loot Box System Creator"),
+            string::utf8(b"{rarity}"),
+            string::utf8(b"{power}"),
+        ];
+
+        let publisher = package::claim(otw, ctx);
+        let mut display = display::new_with_fields<GameItem>(
+            &publisher, keys, values, ctx
+        );
+
+        display::update_version(&mut display);
+
+        transfer::public_transfer(publisher, tx_context::sender(ctx));
+        transfer::public_transfer(display, tx_context::sender(ctx));
     }
 
     // ===== Public Functions =====
@@ -295,8 +337,26 @@ module loot_box::loot_box {
         ctx: &mut TxContext
     ) {
         let amount = balance::value(&config.treasury);
-        let funds = coin::from_balance(balance::split(&mut config.treasury, amount), ctx);
+        let funds = coin::from_balance(balance::split(&mut config.treasury, amount), ctx) ;
         transfer::public_transfer(funds, tx_context::sender(ctx));
+    }
+
+    /// Update the loot box price (admin only)
+    public fun update_price<T>(
+        _admin: &AdminCap,
+        config: &mut GameConfig<T>,
+        new_price: u64,
+    ) {
+        config.loot_box_price = new_price;
+    }
+
+    /// Get current pity count for a user
+    public fun get_pity_count<T>(config: &GameConfig<T>, user: address): u8 {
+        if (dynamic_field::exists_(&config.id, user)) {
+            *dynamic_field::borrow<address, u8>(&config.id, user)
+        } else {
+            0
+        }
     }
 
     // ===== Helper Functions =====
