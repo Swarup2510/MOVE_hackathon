@@ -10,7 +10,13 @@ type View = 'store' | 'inventory' | 'admin';
 export default function App() {
   const [currentView, setCurrentView] = useState<View>('store');
   const [reveal, setReveal] = useState<{ name: string; rarity: number; power: number } | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
+  };
+
   const account = useCurrentAccount();
   useLootBoxPrice(); // Pre-fetch
   useUserNFTs(account?.address || ''); // Pre-fetch
@@ -91,9 +97,9 @@ export default function App() {
               transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
               className="h-full relative z-10"
             >
-              {currentView === 'store' && <StoreView onOpen={() => setCurrentView('inventory')} />}
-              {currentView === 'inventory' && <InventoryView />}
-              {currentView === 'admin' && <AdminView />}
+              {currentView === 'store' && <StoreView onOpen={() => setCurrentView('inventory')} showToast={showToast} />}
+              {currentView === 'inventory' && <InventoryView showToast={showToast} setReveal={setReveal} />}
+              {currentView === 'admin' && <AdminView showToast={showToast} />}
             </motion.div>
           </AnimatePresence>
         )}
@@ -148,6 +154,23 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      {/* Toast Notification */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            className={`fixed bottom-20 left-1/2 -translate-x-1/2 z-[200] px-6 py-3 rounded-2xl shadow-2xl backdrop-blur-xl border flex items-center gap-3 ${
+              toast.type === 'success' ? 'bg-secondary/20 border-secondary/30 text-secondary' : 'bg-red-500/20 border-red-500/30 text-red-400'
+            }`}
+          >
+            <div className={`w-2 h-2 rounded-full animate-pulse ${toast.type === 'success' ? 'bg-secondary' : 'bg-red-400'}`} />
+            <span className="text-sm font-bold uppercase tracking-widest">{toast.message}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Footer / Status Bar */}
       <footer className="h-12 border-t border-white/5 bg-panel/50 backdrop-blur-sm px-8 flex items-center justify-between text-[11px] text-gray-400 uppercase tracking-[0.3em] font-medium">
         <div className="flex items-center gap-6">
@@ -161,18 +184,23 @@ export default function App() {
 }
 
 // Sub-views
-function StoreView({ onOpen }: { onOpen: () => void }) {
+function StoreView({ onOpen, showToast }: { onOpen: () => void; showToast: (msg: string, type?: 'success' | 'error') => void }) {
   const { price } = useLootBoxPrice();
   const { purchase } = usePurchaseLootBox();
   const [buying, setBuying] = useState(false);
 
   const handlePurchase = async () => {
+    if (buying) return;
     setBuying(true);
     try {
       await purchase(Number(price || 100000000));
-      onOpen(); // Move to inventory to open
-    } catch {
-      // toast error
+      showToast("Loot Box Forged Successfully!");
+      setTimeout(() => {
+        onOpen();
+      }, 1000);
+    } catch (e) {
+      showToast("Failed to forge box", "error");
+      console.error(e);
     } finally {
       setBuying(false);
     }
@@ -227,7 +255,7 @@ function StoreView({ onOpen }: { onOpen: () => void }) {
   );
 }
 
-function InventoryView() {
+function InventoryView({ showToast, setReveal }: { showToast: (msg: string, type?: 'success' | 'error') => void; setReveal: (val: any) => void }) {
   const account = useCurrentAccount();
   const { nfts, refetch } = useUserNFTs(account?.address || '');
   // Also get LootBox objects
@@ -240,15 +268,35 @@ function InventoryView() {
 
   const boxes = rawBoxes?.data?.map((o: any) => ({ id: o.data?.objectId })) || [];
 
+  const [openingId, setOpeningId] = useState<string | null>(null);
+
   const handleOpen = async (id: string) => {
+    if (openingId) return;
+    setOpeningId(id);
     try {
-      await open(id);
+      const result = await open(id);
+      showToast("Box Opened! Revealing...");
+      
+      // Extract event from execution result
+      const event = (result as any)?.events?.find((e: any) => e.type.includes('LootBoxOpened'));
+      if (event) {
+        const { rarity, power } = event.parsedJson;
+        setReveal({ 
+          name: rarity === 3 ? "Legendary Artifact" : rarity === 2 ? "Epic Weapon" : rarity === 1 ? "Rare Blade" : "Common Sword",
+          rarity,
+          power 
+        });
+      }
+
       setTimeout(() => {
         refetch();
         refetchBoxes();
-      }, 2000);
-    } catch {
-      // error handling
+        setOpeningId(null);
+      }, 3000);
+    } catch (e) {
+      showToast("Opening failed", "error");
+      console.error(e);
+      setOpeningId(null);
     }
   };
 
@@ -282,9 +330,17 @@ function InventoryView() {
                <h4 className="text-lg font-bold uppercase italic text-center">Ancient Loot Box</h4>
                <button 
                 onClick={() => handleOpen(box.id)}
-                className="w-full py-3 bg-primary text-white font-black uppercase tracking-widest rounded-xl hover:scale-105 transition-all text-xs"
+                disabled={openingId !== null}
+                className={`w-full py-3 text-white font-black uppercase tracking-widest rounded-xl transition-all text-xs flex items-center justify-center gap-2 ${
+                  openingId === box.id ? 'bg-primary/50 cursor-not-allowed' : 'bg-primary hover:scale-105'
+                }`}
                >
-                 Unlock Now
+                 {openingId === box.id ? (
+                   <>
+                     <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                     Unlocking...
+                   </>
+                 ) : 'Unlock Now'}
                </button>
              </div>
           </motion.div>
@@ -325,7 +381,7 @@ function InventoryView() {
   );
 }
 
-function AdminView() {
+function AdminView({ showToast }: { showToast: (msg: string, type?: 'success' | 'error') => void }) {
   const { data: configData } = useSuiClientQuery('getObject', {
     id: GAME_CONFIG_ID,
     options: { showContent: true }
