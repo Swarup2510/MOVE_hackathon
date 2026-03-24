@@ -10,7 +10,7 @@ module loot_box::loot_box {
     use sui::balance::{Self, Balance};
     use sui::dynamic_field;
     use sui::event;
-    use sui::object::{ID, UID};
+    use sui::object::{Self, UID};
     use sui::random::{Self, Random};
     use sui::transfer;
     use sui::tx_context::{Self, TxContext};
