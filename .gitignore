@@ -1,6 +1,50 @@
-build/*
-traces/*
+# Move
+build/
+Move.lock
+traces/
 .trace
-.coverage*
 
-.vscode
+# Node.js
+node_modules/
+dist/
+.env
+.DS_Store
+
+# Logs & Temporary Files
+*.log
+*.txt
+*.json
+!Move.toml
+!package.json
+!tsconfig.json
+!postcss.config.js
+!tailwind.config.js
+!App.css
+!index.css
+!main.tsx
+!App.tsx
+!hooks.ts
+!constants.ts
+!Providers.tsx
+
+# Project Specific Temporary Files
+all_objects.json
+init_call.json
+init_call_utf8.json
+objects_output.json
+tx_output.json
+parse_objects.py
+final_call.txt
+found_objects.txt
+publish_output.txt
+test_output.txt
+test_output2.txt
+test_output3.txt
+test_output4.txt
+test_output5.txt
+test_output6.txt
+test_output7.txt
+test_output8.txt
+init_output.json
+init_output_utf8.json
+final_objects.json
