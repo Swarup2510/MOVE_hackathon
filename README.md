@@ -62,9 +62,6 @@ sui client publish --gas-budget 200000000
 
 ---
 
-## 🏆 Hackathon Submission
-- **Problem Statement**: Gaming / Problem Statement #2.
-- **Difficulty**: Medium.
-- **Objective**: To solve the "trust gap" in gaming loot boxes using verifiable on-chain randomness.
+
 
 
